@@ -22,12 +22,15 @@ const symbolMap = {
     "SOL_USDC": { asset: "SOL", decimal: 6 },
     "ETH_USDC": { asset: "ETH", decimal: 4 }
 };
-let latestPriceUpdate = null;
+const latestPrices = {};
 setInterval(async () => {
-    if (latestPriceUpdate) {
-        await redisClient.publish("price_updates", JSON.stringify({ price_updates: [latestPriceUpdate] }));
-        console.log("Published:", latestPriceUpdate);
-        latestPriceUpdate = null;
+    const updates = Object.values(latestPrices);
+    if (updates.length > 0) {
+        await redisClient.xAdd("price_updates_stream", "*", { data: JSON.stringify({ price_updates: updates }) });
+        console.log("streamed:", updates);
+        for (const key of Object.keys(latestPrices)) {
+            delete latestPrices[key];
+        }
     }
 }, 100);
 backPackSocket.on("open", async () => {
@@ -41,7 +44,7 @@ backPackSocket.on("message", async (raw) => {
     if (symbol && priceStr && symbolMap[symbol]) {
         const { asset, decimal } = symbolMap[symbol];
         const price = Math.round(parseFloat(priceStr) * Math.pow(10, decimal));
-        latestPriceUpdate = { asset, price, decimal };
+        latestPrices[asset] = { asset, price, decimal };
     }
 });
 backPackSocket.on("error", (error) => {

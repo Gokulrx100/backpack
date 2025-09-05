@@ -75,5 +75,11 @@ app.get("/api/v1/signin/post", (req, res) => {
         return res.status(400).json({ error: "Invalid token" });
     }
 });
+app.post("/api/v1/trade/create", (req, res) => {
+    const { asset, type, margin, leverage, slippage } = req.body;
+    if (!asset || !type || !margin || !leverage || !slippage) {
+        return res.status(400).json({ error: "all fields are required" });
+    }
+});
 app.listen(port);
 //# sourceMappingURL=index.js.map

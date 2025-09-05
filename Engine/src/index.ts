@@ -1,27 +1,46 @@
-import {createClient} from "redis";
+import { createClient } from "redis";
 
 const redisClient = createClient({
     socket: {
         host: "localhost",
-        port: 6379 
+        port: 6379
     }
 });
 
-const PRICE : Record<string, any> = {BTC : {}, SOL : {}, ETH : {}};
+const PRICE: Record<string, any> = { BTC: {}, SOL: {}, ETH: {} };
 
 
 
 const start = async () => {
     await redisClient.connect();
 
-    redisClient.subscribe("price_updates", (message, _channel) => {
-        const data = JSON.parse(message);
-        for (const update of data.price_updates) {
-            const { asset, price, decimal } = update;
-            PRICE[asset] = { price: price, decimal: decimal }
+    while (true) {
+        const res = await redisClient.xRead(
+            [
+                {
+                    key: "price_updates_stream",
+                    id: "$"
+                }
+            ],
+            { BLOCK: 0 }
+        );
+        //@ts-ignore
+        const {name, messages} = res[0];
+        
+        for (const message of messages) { 
+            const data = JSON.parse(message.message.data);
+            const priceUpdates = data.price_updates;
+
+            for (const update of priceUpdates){
+                PRICE[update.asset] = {
+                    price : update.price,
+                    decimal : update.decimal
+                };
+            }
         }
-        console.log(PRICE);
-    });
+
+        console.log("Updated price : ", PRICE);
+    }
 }
 
 start();

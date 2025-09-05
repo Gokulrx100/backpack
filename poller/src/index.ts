@@ -7,7 +7,7 @@ const backPackSocket: WebSocket = new WebSocket(url);
 const redisClient = createClient({
     socket: {
         host: "localhost",
-        port: 6379 
+        port: 6379
     }
 });
 
@@ -39,13 +39,18 @@ const symbolMap: Record<string, { asset: string; decimal: number }> = {
     "ETH_USDC": { asset: "ETH", decimal: 4 }
 };
 
-let latestPriceUpdate: PriceUpdate | null = null;
+const latestPrices: Record<string, PriceUpdate> = {};
 
 setInterval(async () => {
-    if (latestPriceUpdate) {
-        await redisClient.publish("price_updates", JSON.stringify({ price_updates: [latestPriceUpdate] }));
-        console.log("Published:", latestPriceUpdate);
-        latestPriceUpdate = null;
+    const updates = Object.values(latestPrices);
+
+    if (updates.length > 0) {
+        await redisClient.xAdd("price_updates_stream", "*", { data: JSON.stringify({ price_updates: updates }) });
+        console.log("streamed:", updates);
+
+        for (const key of Object.keys(latestPrices)) {
+            delete latestPrices[key];
+        }
     }
 }, 100);
 
@@ -62,7 +67,7 @@ backPackSocket.on("message", async (raw: WebSocket.Data) => {
     if (symbol && priceStr && symbolMap[symbol]) {
         const { asset, decimal } = symbolMap[symbol];
         const price = Math.round(parseFloat(priceStr) * Math.pow(10, decimal));
-        latestPriceUpdate = { asset, price, decimal };
+        latestPrices[asset] = { asset, price, decimal };
     }
 });
 
