@@ -32,6 +32,18 @@ await redisClient.connect();
 
 const resend = new Resend(process.env.RESEND_API_KEY!);
 
+const getAuthenticatedUser = (req : Request) : string | null => {
+    const token = req.cookies.auth;
+    if(!token) return null;
+
+    try{
+        const decoded = jwt.verify(token, JWT_SECRET) as {email : string};
+        return decoded.email;
+    }catch{
+        return null
+    }
+}
+
 const sendMail = async (to: string, subject: string, text: string) => {
     if (process.env.NODE_ENV === "dev") {
         console.log(`DEV MODE : Would send email to ${to} with link : ${text}`);
@@ -75,6 +87,7 @@ app.post("/api/v1/signup", async (req :Request , res : Response) => {
         }
 
         const token = jwt.sign({email}, JWT_SECRET);
+        res.cookie("auth", token, { httpOnly: true });
         const link = `http://localhost:${port}/api/v1/signin/post?token=${token}`;
         await sendMail(email, "Signup Link", link);
 
@@ -115,10 +128,11 @@ app.post("/api/v1/signin", async (req : Request, res : Response) => {
         }
 
         const token = jwt.sign({email}, JWT_SECRET);
+        res.cookie("auth", token, { httpOnly: true });
         const link = `http://localhost:${port}/api/v1/signin/post?token=${token}`;
         await sendMail(email, "Signup Link", link);
 
-        res.status(200).json({ message : "Signin email sent"});
+        res.status(200).json({ message : "Signin email sent", token});
     }catch(err){
         console.error("Signin Error : ", err);
 
@@ -130,6 +144,59 @@ app.post("/api/v1/signin", async (req : Request, res : Response) => {
         return res.status(500).json({ error : "Internal Server Error"});
     }
 });
+
+app.post("/api/v1/trade/create", async (req : Request, res : Response) => {
+
+    const email = getAuthenticatedUser(req);
+    if(!email){
+        return res.status(401).json({ error : "Authentication required"});
+    }
+
+    const {asset, type, margin, leverage, slippage} = req.body;
+
+    if (!asset || !type || !margin || !leverage || !slippage) {
+        return res.status(400).json({ error: "all fields are required" });
+    }
+
+    try{
+        const correlationId = uuidv4();
+
+        await redisClient.xAdd("price_updates_stream", "*",{
+            type : "trade_create",
+            email,
+            asset,
+            tradeType : type,
+            margin : margin.toString(),
+            leverage : leverage.toString(),
+            slippage : slippage.toString(),
+            createdAt : Date.now().toString(),
+            correlationId
+        });
+
+        const response = await redisSubscriber.waitForMessage(correlationId);
+
+        if(response.status !== "success"){
+            return res.status(400).json({
+                error : response.error || "Trade creation failed"
+            });
+        }
+
+        res.status(200).json({
+            orderId : response.orderId
+        });
+    }catch(err){
+        console.error("Trade creation error : ", err);
+
+        //@ts-ignore
+        if (err.message && err.message.includes("Timeout")) {
+            return res.status(504).json({ error: "Engine did not respond in time" });
+        }
+        
+        return res.status(500).json({ error: "Internal Server Error" });
+    }
+});
+
+
 
 
 
