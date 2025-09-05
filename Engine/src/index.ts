@@ -36,9 +36,35 @@ const start = async () => {
 
                 await redisClient.xAdd("engine_response_stream", "*", {
                     status: "success",
+                    type:"signup",
+                    userBalance : USERS[fields.email]?.balance?.toString() ?? "0",
                     email: fields.email,
-                    correlationId: fields.correlationId
+                    correlationId: fields.correlationId,
+                    timestamp : Date.now().toString()
                 });
+            }
+
+            if(fields.type === "signin") {
+                if(USERS[fields.email]){
+                    console.log("User signin sttempt : ", fields.email);
+
+                    await redisClient.xAdd("engine_response_stream", "*", {
+                        status : "success",
+                        type : "signin",
+                        email : fields.email,
+                        correlationId: fields.correlationId
+                    });
+                }else{
+                    console.log("Signin failed - user not found");
+
+                    await redisClient.xAdd("engine_response_stream", "*", {
+                        status:"error",
+                        type : "signin",
+                        error : "User not found",
+                        email : fields.email,
+                        correlationId : fields.correlationId
+                    })
+                }
             }
 
             if (fields.data) {

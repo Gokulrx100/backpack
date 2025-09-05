@@ -91,6 +91,46 @@ app.post("/api/v1/signup", async (req :Request , res : Response) => {
 });
 
 
+app.post("/api/v1/signin", async (req : Request, res : Response) => {
+    const {email} = req.body;
+
+    if(!email){
+        return res.status(400).json({ error : "Please enter an email to signin"});
+    }
+
+    try{
+        const correlationId = uuidv4();
+
+        await redisClient.xAdd("price_updates_stream", "*", {
+            type : "signin",
+            email,
+            createdAt : Date.now().toString(),
+            correlationId
+        });
+
+        const response = await redisSubscriber.waitForMessage(correlationId);
+
+        if(response.status !== "success"){
+            return res.status(404).json({ error : response.error || "User not Found"});
+        }
+
+        const token = jwt.sign({email}, JWT_SECRET);
+        const link = `http://localhost:${port}/api/v1/signin/post?token=${token}`;
+        await sendMail(email, "Signup Link", link);
+
+        res.status(200).json({ message : "Signin email sent"});
+    }catch(err){
+        console.error("Signin Error : ", err);
+
+        //@ts-ignore
+        if (err.message && err.message.includes("Timeout")) {
+            return res.status(504).json({ error : "Engine did not respond in time"});
+        }
+        
+        return res.status(500).json({ error : "Internal Server Error"});
+    }
+});
+
 
 
 app.listen(port);
