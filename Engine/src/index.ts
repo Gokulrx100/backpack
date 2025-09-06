@@ -1,23 +1,30 @@
 import { createClient } from "redis";
-import { type User, type Order } from "./types.js";
-import { v4 as uuidv4 } from "uuid";
+import { type User, type Order} from "./types.js"
+import {v4 as uuidv4} from "uuid";
+import * as decimalUtils from "./utils/decimal.js";
 
 const redisClient = createClient({
-  socket: { host: "localhost", port: 6379 },
+  socket : {
+    host : "localhost",
+    port : 6379
+  }
 });
 
-const PRICE: Record<string, any> = { BTC: {}, SOL: {}, ETH: {} };
-const USERS: Record<string, User> = {};
+const PRICE : Record<string, { price : number; decimal : number}> = {
+  BTC: { price: 0, decimal: 4 }, 
+  SOL: { price: 0, decimal: 6 }, 
+  ETH: { price: 0, decimal: 4 } 
+}
+
+const USERS : Record<string, User> = {};
 const DECIMAL_COUNT = 4;
+const MARGIN_DECIMALS_COUNT = 2;
 
 const start = async () => {
   await redisClient.connect();
 
-  while (true) {
-    const res = await redisClient.xRead(
-      [{ key: "price_updates_stream", id: "$" }],
-      { BLOCK: 0 }
-    );
+  while(true){
+    const res = await redisClient.xRead([{ key : "price_updates_stream", id : "$"}], {BLOCK : 0});
 
     if (!Array.isArray(res) || res.length === 0) continue;
 
@@ -27,10 +34,11 @@ const start = async () => {
     for (const message of messages) {
       const { id, message: fields } = message;
 
-      if (fields.type === "signup") {
+      if (fields.type === "signup"){
         USERS[fields.email] = {
           email: fields.email,
           balance: 5000 * Math.pow(10, DECIMAL_COUNT),
+          balanceDecimal: DECIMAL_COUNT,
           openOrders: {},
         };
 
@@ -46,14 +54,16 @@ const start = async () => {
         });
       }
 
-      if (fields.type === "signin") {
+      if (fields.type === "signin"){
         if (USERS[fields.email]) {
-          console.log("User signin sttempt : ", fields.email);
+          console.log("User signin attempt:", fields.email);
 
           await redisClient.xAdd("engine_response_stream", "*", {
             status: "success",
             type: "signin",
             email: fields.email,
+            userBalance: USERS[fields.email]?.balance?.toString() ?? "0",
+            balanceDecimal: USERS[fields.email]?.balanceDecimal?.toString() ?? DECIMAL_COUNT.toString(),
             correlationId: fields.correlationId,
           });
         } else {
@@ -69,7 +79,7 @@ const start = async () => {
         }
       }
 
-      if (fields.type === "trade_create") {
+      if(fields.type === "trade_create"){
         const user = USERS[fields.email];
 
         if (!user) {
@@ -83,6 +93,8 @@ const start = async () => {
         }
 
         const marginRaw = parseInt(fields.margin);
+        const leverage = parseInt(fields.leverage);
+        const asset = fields.asset;
 
         if (user.balance < marginRaw) {
           await redisClient.xAdd("engine_response_stream", "*", {
@@ -94,18 +106,34 @@ const start = async () => {
           continue;
         }
 
+        if (!PRICE[asset] || PRICE[asset].price === 0) {
+          await redisClient.xAdd("engine_response_stream", "*", {
+            status: "error",
+            type: "trade_create",
+            error: "Price not available for asset",
+            correlationId: fields.correlationId,
+          });
+          continue;
+        }
+
         const orderId = uuidv4();
 
-        const order: Order = {
+        const { positionValueInStandard, positionSizeInAsset} = decimalUtils.calculatePositionValue(marginRaw, leverage, PRICE[asset].price, PRICE[asset].decimal);
+
+        const order : Order = {
           id: orderId,
           asset: fields.asset,
           type: fields.tradeType as "long" | "short",
           margin: marginRaw,
-          marginDecimal: DECIMAL_COUNT,
-          leverage: parseInt(fields.leverage),
+          marginDecimal: MARGIN_DECIMALS_COUNT,
+          leverage: leverage,
           slippage: parseInt(fields.slippage),
           createdAt: new Date(),
-        };
+          entryPrice: PRICE[asset].price,
+          entryPriceDecimal: PRICE[asset].decimal,
+          positionSize: positionSizeInAsset,
+          positionSizeDecimals: PRICE[asset].decimal
+        }
 
         user.balance -= marginRaw;
         user.openOrders[order.id] = order;
@@ -117,6 +145,87 @@ const start = async () => {
           type: "trade_create",
           userBalance: user.balance.toString(),
           orderId: orderId.toString(),
+          email: fields.email,
+          correlationId: fields.correlationId,
+        });
+      }
+
+      if(fields.type === "trade_close"){
+        const user = USERS[fields.email];
+        const orderId = fields.orderId;
+
+        if (!user) {
+          await redisClient.xAdd("engine_response_stream", "*", {
+            status: "error",
+            type: "trade_close",
+            error: "User not found",
+            correlationId: fields.correlationId,
+          });
+          continue;
+        }
+
+        const order = user.openOrders[orderId];
+        if (!order) {
+          await redisClient.xAdd("engine_response_stream", "*", {
+            status: "error",
+            type: "trade_close",
+            error: "Order not found",
+            correlationId: fields.correlationId,
+          });
+          continue;
+        }
+
+        if (!PRICE[order.asset] || PRICE[order.asset]!.price === 0) {
+          await redisClient.xAdd("engine_response_stream", "*", {
+            status: "error",
+            type: "trade_close",
+            error: "Price not available for asset",
+            correlationId: fields.correlationId,
+          });
+          continue;
+        }
+
+        const currentPrice = PRICE[order.asset]!.price;
+        const currentPriceDecimals = PRICE[order.asset]!.decimal;
+
+        let pnl = 0;
+        
+        if(order.type === "long"){
+           pnl = decimalUtils.subtract(
+            currentPrice, currentPriceDecimals,
+            order.entryPrice, order.entryPriceDecimal,
+            currentPriceDecimals
+          );
+        }else{
+            pnl = decimalUtils.subtract(
+            order.entryPrice, order.entryPriceDecimal,
+            currentPrice, currentPriceDecimals,
+            currentPriceDecimals
+          );
+        }
+
+        const totalPnlUSD = decimalUtils.multiply(
+          pnl, currentPriceDecimals,
+          order.positionSize, DECIMAL_COUNT,
+          MARGIN_DECIMALS_COUNT
+        );
+
+        const pnlInBalanceDecimals = decimalUtils.convertDecimals(
+          totalPnlUSD, MARGIN_DECIMALS_COUNT, DECIMAL_COUNT
+        );
+
+        user.balance += order.margin + pnlInBalanceDecimals;
+
+        delete user.openOrders[orderId];
+
+        console.log(`Trade closed for ${fields.email}:`, orderId, "PnL:", totalPnlUSD);
+
+        await redisClient.xAdd("engine_response_stream", "*", {
+          status: "success",
+          type: "trade_close",
+          userBalance: user.balance.toString(),
+          pnl: totalPnlUSD.toString(),
+          orderId: orderId,
           email: fields.email,
           correlationId: fields.correlationId,
         });
@@ -135,8 +244,8 @@ const start = async () => {
 
         console.log("Updated price:", PRICE);
       }
-    }
+    } 
   }
-};
+}
 
 start();

@@ -16,6 +16,30 @@ const redisClient = createClient({
     }
 });
 
+interface AssetInfo {
+    symbol: string;
+    name: string;
+    imageUrl: string;
+}
+
+const SUPPORTED_ASSETS: AssetInfo[] = [
+    {
+        symbol: "BTC",
+        name: "Bitcoin",
+        imageUrl: "image.com/png"
+    },
+    {
+        symbol: "SOL",
+        name: "Solana", 
+        imageUrl: "image.com/png"
+    },
+    {
+        symbol: "ETH",
+        name: "Ethereum",
+        imageUrl: "image.com/png"
+    }
+];
+
 const redisSubscriber = new RedisSubscriber();
 
 dotenv.config();
@@ -145,6 +169,23 @@ app.post("/api/v1/signin", async (req : Request, res : Response) => {
     }
 });
 
+app.get("/api/v1/signin/post", async (req: Request, res: Response) => {
+    const { token } = req.query;
+
+    if (!token || typeof token !== 'string') {
+        return res.status(400).json({ error: "Invalid token" });
+    }
+
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET) as { email: string };
+        res.cookie("auth", token, { httpOnly: true });
+        const redirectUrl = "http://localhost:3000/dashboard";
+        res.redirect(redirectUrl);
+    } catch (err) {
+        return res.status(400).json({ error: "Invalid or expired token" });
+    }
+});
+
 app.post("/api/v1/trade/create", async (req : Request, res : Response) => {
 
     const email = getAuthenticatedUser(req);
@@ -196,7 +237,53 @@ app.post("/api/v1/trade/create", async (req : Request, res : Response) => {
     }
 });
 
+app.post("/api/v1/trade/close", async (req: Request, res: Response) => {
+    const email = getAuthenticatedUser(req);
+    if (!email) {
+        return res.status(401).json({ error: "Authentication required" });
+    }
 
+    const { orderId } = req.body;
+
+    if (!orderId) {
+        return res.status(400).json({ error: "orderId is required" });
+    }
+
+    try {
+        const correlationId = uuidv4();
+
+        await redisClient.xAdd("price_updates_stream", "*", {
+            type: "trade_close",
+            email,
+            orderId: orderId.toString(),
+            createdAt: Date.now().toString(),
+            correlationId
+        });
+
+        const response = await redisSubscriber.waitForMessage(correlationId);
+
+        if (response.status !== "success") {
+            return res.status(400).json({
+                error: response.error || "Trade close failed"
+            });
+        }
+
+        res.status(200).json({
+            message: "Trade closed successfully",
+            pnl: response.pnl,
+            newBalance: response.userBalance
+        });
+    } catch (err) {
+        console.error("Trade close error:", err);
+
+        //@ts-ignore
+        if (err.message && err.message.includes("Timeout")) {
+            return res.status(504).json({ error: "Engine did not respond in time" });
+        }
+
+        return res.status(500).json({ error: "Internal Server Error" });
+    }
+});
 
 
 
