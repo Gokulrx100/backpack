@@ -89,7 +89,7 @@ backPackSocket.on("message", async (raw : WebSocket.Data) => {
                 decimal
             };
 
-            console.log(`Updated ${asset}: $${midPrice.toFixed(6)} -> ${price} (${decimal} decimals)`);
+            // console.log(`Updated ${asset}: $${midPrice.toFixed(6)} -> ${price} (${decimal} decimals)`);
         }
     }catch(error){
         console.error("Error parsing WebSocket message : ", error);

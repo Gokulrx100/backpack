@@ -23,7 +23,6 @@ export const fromStandardDecimals = (value : bigint, targetDecimals : number) : 
 export const multiply = (value1 : number, decimals1: number, value2: number, decimals2: number, resultDecimals: number) : number => {
     const standardValue1 = toStandardDecimals(value1, decimals1);
     const standardValue2 = toStandardDecimals(value2, decimals2);
-    //@ts-ignore
     const result = (standardValue1 * standardValue2) / BigInt(Math.pow(10, STANDARD_DECIMALS));
     return fromStandardDecimals(result, resultDecimals);
 }

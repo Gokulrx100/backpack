@@ -20,16 +20,3 @@ export interface Order {
     positionSizeDecimals: number;
 }
 
-export interface PriceUpdate {
-    asset: string;
-    price: number;
-    decimal: number;
-}
-
-export interface BalanceResponse {
-    [asset: string]: {
-        balance: number;
-        decimals: number;
-    };
-}
-

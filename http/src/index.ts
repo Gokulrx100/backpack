@@ -285,6 +285,54 @@ app.post("/api/v1/trade/close", async (req: Request, res: Response) => {
     }
 });
 
+app.get("/api/v1/balance/usd", async (req: Request, res: Response) => {
+    const email = getAuthenticatedUser(req);
+    if (!email) {
+        return res.status(401).json({ error: "Authentication required" });
+    }
 
+    try {
+        const correlationId = uuidv4();
+
+        await redisClient.xAdd("price_updates_stream", "*", {
+            type: "get_balance_usd",
+            email,
+            correlationId
+        });
+
+        const response = await redisSubscriber.waitForMessage(correlationId);
+
+        if (response.status !== "success") {
+            return res.status(400).json({
+                error: response.error || "Failed to get balance"
+            });
+        }
+
+        const balanceValue = parseInt(response.balance);
+        const decimals = parseInt(response.decimals);
+        const actualBalance = balanceValue / Math.pow(10, decimals);
+
+        res.status(200).json({
+            balance: actualBalance
+        });
+    } catch (err) {
+        console.error("Get balance error:", err);
+
+        //@ts-ignore
+        if (err.message && err.message.includes("Timeout")) {
+            return res.status(504).json({ error: "Engine did not respond in time" });
+        }
+
+        return res.status(500).json({ error: "Internal Server Error" });
+    }
+});
+
+
+
+app.get("/api/v1/supportedAssets", async (req: Request, res: Response) => {
+    res.status(200).json({
+        assets: SUPPORTED_ASSETS
+    });
+});
 
 app.listen(port);
