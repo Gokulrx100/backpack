@@ -148,6 +148,7 @@ const start = async () => {
           positionSizeDecimals: PRICE[asset].decimal
         }
 
+        user.balance -= marginRaw;
         user.openOrders[order.id] = order;
 
         console.log(`Trade created for ${fields.email}:`, orderId);
@@ -228,7 +229,7 @@ const start = async () => {
         const releasedPnl = Math.max(pnlInBalanceDecimals, maxLoss);
 
         console.log("pnlBalanceDecimals : ",releasedPnl);
-        user.balance +=  releasedPnl;
+        user.balance += (order.margin + releasedPnl);
 
         console.log(user.balance);
 
