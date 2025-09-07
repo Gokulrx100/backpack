@@ -27,24 +27,10 @@ export const multiply = (value1 : number, decimals1: number, value2: number, dec
     return fromStandardDecimals(result, resultDecimals);
 }
 
-export const divide = (dividend : number, dividendDecimals: number, divisor: number, divisorDecimals: number, resultDecimals: number) : number => {
-    const standardDividend = toStandardDecimals(dividend, dividendDecimals);
-    const standardDivisor = toStandardDecimals(divisor, divisorDecimals);
-    const result = (standardDividend * BigInt(Math.pow(10, STANDARD_DECIMALS))) / standardDivisor;
-    return fromStandardDecimals(result, resultDecimals);
-}
-
 export const subtract = (value1: number, decimals1: number, value2: number, decimals2: number, resultDecimals: number): number => {
   const standardValue1 = toStandardDecimals(value1, decimals1);
   const standardValue2 = toStandardDecimals(value2, decimals2);
   const result = standardValue1 - standardValue2;
-  return fromStandardDecimals(result, resultDecimals);
-};
-
-export const add = (value1: number, decimals1: number, value2: number, decimals2: number, resultDecimals: number): number => {
-  const standardValue1 = toStandardDecimals(value1, decimals1);
-  const standardValue2 = toStandardDecimals(value2, decimals2);
-  const result = standardValue1 + standardValue2;
   return fromStandardDecimals(result, resultDecimals);
 };
 
@@ -58,7 +44,7 @@ export const calculatePositionValue = (margin: number, leverage: number, price: 
 
   const positionValueInStandard = (standardMargin * standardLeverage) / BigInt(Math.pow(10, STANDARD_DECIMALS));
 
-  const positionSizeInAsset = Number((positionValueInStandard * BigInt(Math.pow(10, STANDARD_DECIMALS))) / standardPrice);
+  const positionSizeInAsset = Math.round(Number(positionValueInStandard) / Number(standardPrice) * Math.pow(10, priceDecimals));
   
   return {
     positionValueInStandard,

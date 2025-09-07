@@ -211,8 +211,11 @@ const start = async () => {
           totalPnlUSD, MARGIN_DECIMALS_COUNT, DECIMAL_COUNT
         );
 
-        console.log("pnlBalanceDecimals : ",pnlInBalanceDecimals);
-        user.balance +=  pnlInBalanceDecimals;
+        const maxLoss = -order.margin;
+        const releasedPnl = Math.max(pnlInBalanceDecimals, maxLoss);
+
+        console.log("pnlBalanceDecimals : ",releasedPnl);
+        user.balance +=  releasedPnl;
 
         console.log(user.balance);
 
@@ -224,7 +227,7 @@ const start = async () => {
           status: "success",
           type: "trade_close",
           userBalance: user.balance.toString(),
-          pnl: totalPnlUSD.toString(),
+          pnl: releasedPnl.toString(),
           orderId: orderId,
           email: fields.email,
           correlationId: fields.correlationId,
