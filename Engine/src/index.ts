@@ -23,6 +23,19 @@ const MARGIN_DECIMALS_COUNT = 2;
 const start = async () => {
   await redisClient.connect();
 
+  const raw = await redisClient.get("engine:users_snapshot");
+  if (raw){
+    Object.assign(USERS, JSON.parse(raw));
+  } 
+
+  setInterval(async () => {
+    try {
+      await redisClient.set("engine:users_snapshot", JSON.stringify(USERS));
+    } catch (e) {
+      console.error("Snapshot save failed", e);
+    }
+  }, 2000);
+  
   while(true){
     const res = await redisClient.xRead([{ key : "price_updates_stream", id : "$"}], {BLOCK : 0});
 
